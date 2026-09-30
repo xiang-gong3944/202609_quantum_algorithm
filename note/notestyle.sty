@@ -1,0 +1,75 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{notestyle}
+
+% Math
+\RequirePackage{amsmath}
+\RequirePackage{amssymb}
+\RequirePackage{amsthm}
+\RequirePackage{mathtools}
+\RequirePackage{bm}
+\RequirePackage{braket}
+
+% Physics
+\RequirePackage{physics}
+
+% Figures and colors
+\RequirePackage[dvipdfmx]{graphicx}
+\RequirePackage{xcolor}
+
+% Boxes
+\RequirePackage[most]{tcolorbox}
+
+% Links
+\RequirePackage[
+  dvipdfmx,
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+]{hyperref}
+\RequirePackage{pxjahyper}
+
+% Citations
+\RequirePackage{cite}
+
+% Theorem environments
+\theoremstyle{definition}
+\newtheorem{definition}{定義}[section]
+\newtheorem{example}[definition]{例}
+\newtheorem{remark}[definition]{注意}
+
+\theoremstyle{plain}
+\newtheorem{theorem}[definition]{定理}
+\newtheorem{lemma}[definition]{補題}
+\newtheorem{proposition}[definition]{命題}
+\newtheorem{corollary}[definition]{系}
+
+% Note box
+\tcbset{
+  note-box/.style={
+    enhanced,
+    breakable,
+    colback=black!2,
+    colframe=black!35,
+    coltitle=black,
+    fonttitle=\bfseries,
+    boxrule=0.5pt,
+    arc=1mm,
+    boxsep=1.2mm,
+    left=1.6mm,
+    right=1.6mm,
+    top=1.2mm,
+    bottom=1.2mm
+  }
+}
+
+\newtcolorbox{notebox}[1][]{
+  note-box,
+  title={#1}
+}
+
+% Common operators
+\DeclareMathOperator{\Ker}{Ker}
+\DeclareMathOperator{\Img}{Im}
+\DeclareMathOperator{\Hom}{Hom}
+\DeclareMathOperator{\End}{End}

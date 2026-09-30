@@ -1,0 +1,639 @@
+\documentclass[uplatex,dvipdfmx,11pt,a4paper]{jsarticle}
+
+\usepackage{notestyle}
+
+\title{確率混合による量子シミュレーション\\
+  \large Randomized product formulas と qDRIFT}
+\author{}
+\date{\today}
+
+% Document-specific macros
+\newcommand{\cE}{\mathcal{E}}
+\newcommand{\cF}{\mathcal{F}}
+\newcommand{\cI}{\mathcal{I}}
+\newcommand{\cL}{\mathcal{L}}
+\newcommand{\cR}{\mathcal{R}}
+\newcommand{\cS}{\mathcal{S}}
+\newcommand{\cU}{\mathcal{U}}
+\newcommand{\cV}{\mathcal{V}}
+\newcommand{\Sym}{\operatorname{Sym}}
+\newcommand{\chanerr}{\Delta}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\section{はじめに}
+
+量子計算機上で Hamiltonian
+\begin{equation}
+  H=\sum_{j=1}^{L}H_j
+\end{equation}
+の時間発展
+\begin{equation}
+  U(t)=e^{-itH}
+\end{equation}
+を実装したいとする。各 $e^{-i\tau H_j}$ は実装できるが、一般には異なる
+$H_j$ 同士が可換でないため、$e^{-itH}$ をそのまま一つの基本ゲートとしては
+扱えない。最も素朴な解決は Lie--Trotter 公式
+\begin{equation}
+  e^{-itH}
+  \approx
+  \left(\prod_{j=1}^{L}e^{-i(t/r)H_j}\right)^r
+\end{equation}
+である。しかし、左辺ではすべての $H_j$ が対等であるのに、右辺では人為的に
+順序を選んでいる。この順序に由来する coherent な誤差を、古典乱数で平均化
+できないだろうか、というのが本稿の出発点である。
+
+本稿では、古典確率混合を使う二つの Hamiltonian simulation を扱う。第一は
+積公式内の Hamiltonian 項をランダムに並べ替える randomized product formula
+\cite{Childs2019Faster}、第二は係数の大きさに比例して一項だけをサンプルする
+qDRIFT \cite{Campbell2019Random} である。前者では Taylor 展開の支配的な項が
+置換平均により消え、後者では平均チャネルの生成子が理想的な生成子と一致する。
+いずれも個々のランダム回路を理想ユニタリに近づけるというより、乱数を忘れた
+後の混合チャネルを理想チャネルに近づける方法である。
+
+以下では、まず共通の誤差尺度と mixing lemma を準備する。その後、それぞれの
+手法について、直観、アルゴリズム、スケーリング、証明の順に説明する。符号は
+全編を通して $e^{-itH}$ に統一し、積公式の複素時間を $z$、qDRIFT で現れる
+係数の $\ell_1$ ノルムを $\lambda$ と書く。
+
+\section{共通の準備}
+
+\subsection{トレースノルムと量子チャネル}
+
+演算子 $X$ のスペクトルノルムとトレースノルムを、それぞれ
+$\norm{X}$ と $\norm{X}_1$ で表す。二つのチャネルの誤差を
+\begin{equation}
+  \chanerr(\cE,\cF)
+  :=\sup_{\rho}\norm{\cE(\rho)-\cF(\rho)}_1
+  \label{eq:channel-error}
+\end{equation}
+と定義する。上限は入力系上の密度演算子全体について取る。量子チャネルは
+トレース距離を増加させない。したがってチャネル列 $\cE_m\cdots\cE_1$ と
+$\cF_m\cdots\cF_1$ に対して telescoping sum を取れば、
+\begin{equation}
+  \chanerr(
+    \cE_m\cdots\cE_1,
+    \cF_m\cdots\cF_1)
+  \leq
+  \sum_{a=1}^{m}\chanerr(\cE_a,\cF_a)
+  \label{eq:composition-subadditivity}
+\end{equation}
+を得る。局所的な一ステップ誤差から全時間の誤差を評価するとき、両手法で
+この不等式を用いる。
+
+ユニタリ $U$ が誘導するチャネルを
+\begin{equation}
+  \cU(\rho):=U\rho U^\dagger
+\end{equation}
+と書く。ここで重要なのは、演算子の線型結合
+$\sum_jp_jU_j$ と、チャネルの凸結合
+\begin{equation}
+  \sum_jp_j\cU_j(\rho)
+  =\sum_jp_jU_j\rho U_j^\dagger
+\end{equation}
+は異なるという点である。前者を coherent に実装するには一般に補助量子系、
+状態準備、select 操作などが必要である。後者は古典乱数で $j$ を選び $U_j$ を
+適用した後、選択結果を捨てれば実装できる。
+
+\subsection{Mixing lemma}
+
+古典混合を演算子平均から解析するための道具が mixing lemma である。
+
+\begin{lemma}[Mixing lemma]
+  $V$ と $\{U_j\}$ をユニタリ、$p_j\geq0$、$\sum_jp_j=1$ とする。
+  ある $a,b\geq0$ に対して
+  \begin{equation}
+    \norm{U_j-V}\leq a\quad(\forall j),
+    \qquad
+    \norm{\sum_jp_jU_j-V}\leq b
+    \label{eq:mixing-assumptions}
+  \end{equation}
+  が成り立つなら、対応する混合ユニタリ・チャネルは
+  \begin{equation}
+    \chanerr\left(\sum_jp_j\cU_j,\cV\right)
+    \leq a^2+2b
+    \label{eq:mixing-lemma}
+  \end{equation}
+  を満たす。
+\end{lemma}
+
+\begin{proof}
+  $E_j:=U_j-V$ および $\overline{E}:=\sum_jp_jE_j$ と置く。
+  任意の密度演算子 $\rho$ に対して各 $U_j=V+E_j$ を展開すると
+  \begin{align}
+    \sum_jp_jU_j\rho U_j^\dagger-V\rho V^\dagger
+    =\overline{E}\rho V^\dagger
+     +V\rho\overline{E}^\dagger
+     +\sum_jp_jE_j\rho E_j^\dagger.
+    \label{eq:mixing-expansion}
+  \end{align}
+  $\norm{AXB}_1\leq\norm{A}\norm{X}_1\norm{B}$、
+  $\norm{\rho}_1=1$、$\norm{V}=1$ を使えば
+  \begin{align}
+    \norm{\sum_jp_j\cU_j(\rho)-\cV(\rho)}_1
+    &\leq2\norm{\overline{E}}
+      +\sum_jp_j\norm{E_j}^2\\
+    &\leq2b+a^2.
+  \end{align}
+  最後に $\rho$ について上限を取ればよい。
+\end{proof}
+
+この補題の要点は、各 $U_j$ の個別誤差 $a$ は二乗でしか効かず、平均演算子の
+誤差 $b$ だけが一次で効くことである。したがって平均演算子で低次誤差が
+相殺されれば、実際に実装するのがユニタリの線型結合ではなくチャネルの
+古典混合であっても、その相殺を利用できる。
+
+\section{Randomized product formulas}
+
+\subsection{お気持ち：順序が作る非対称性を平均する}
+
+まず $H=H_1+H_2$ とする。一次積公式と理想発展を二次まで展開すると
+\begin{align}
+  e^{zH_1}e^{zH_2}
+  &={I}+z(H_1+H_2)
+    +\frac{z^2}{2}(H_1^2+2H_1H_2+H_2^2)
+    +O(z^3),
+    \label{eq:forward-expansion}\\
+  e^{z(H_1+H_2)}
+  &={I}+z(H_1+H_2)
+    +\frac{z^2}{2}(H_1^2+H_1H_2+H_2H_1+H_2^2)
+    +O(z^3).
+    \label{eq:ideal-expansion}
+\end{align}
+固定順序では $H_1H_2$ と $H_2H_1$ の一方しか正しい重みで現れない。一方、
+逆順公式も含めた演算子平均では
+\begin{equation}
+  \frac12\left(e^{zH_1}e^{zH_2}+e^{zH_2}e^{zH_1}\right)
+  =e^{z(H_1+H_2)}+O(z^3)
+  \label{eq:two-term-average}
+\end{equation}
+となり、二次項まで一致する。
+
+式~\eqref{eq:two-term-average} の左辺は一般にはユニタリではない。これを LCU と
+して coherent に実装することは可能だが、$L!$ 通りの置換をすべて重ね合わせる
+なら、置換を指定するレジスタだけでも
+\begin{equation}
+  \left\lceil\log_2L!\right\rceil
+  =\Theta(L\log L)
+\end{equation}
+qubit を要し、さらに状態準備と select 操作のコストが加わる。そこで、各時間
+区間で置換を一つ古典的に選び、対応する積公式を適用する。乱数を捨てれば、
+一様な混合ユニタリ・チャネルが実装される。
+
+以下で用いる $\Sym(L)$ 上の平均は有限群上の一様平均である。これは有限群の
+正規化 Haar 測度による平均と言ってもよいが、連続群積分ではなく単なる
+$L!$ 項の算術平均である。
+
+\subsection{アルゴリズムの定義}
+
+置換 $\sigma\in\Sym(L)$ に対する一次公式を
+\begin{equation}
+  S_1^\sigma(z):=\prod_{j=1}^{L}e^{zH_{\sigma(j)}}
+\end{equation}
+とする。一次の場合には、すべての置換を使わず、ある順序とその逆順を確率
+$1/2$ で選ぶだけでも二次までの平均誤差を消せる。
+
+高次の場合は対称な二次 Suzuki 公式
+\begin{equation}
+  S_2^\sigma(z)
+  :=\prod_{j=1}^{L}e^{zH_{\sigma(j)}/2}
+    \prod_{j=L}^{1}e^{zH_{\sigma(j)}/2}
+\end{equation}
+と、$k>1$ に対する再帰式
+\begin{align}
+  S_{2k}^\sigma(z)
+  &:=[S_{2k-2}^\sigma(p_kz)]^2
+    S_{2k-2}^\sigma((1-4p_k)z)
+    [S_{2k-2}^\sigma(p_kz)]^2,\\
+  p_k&:=\frac{1}{4-4^{1/(2k-1)}}
+\end{align}
+を用いる。一時間区間の randomized product formula はチャネル
+\begin{equation}
+  \cR_{2k}(z)
+  :=\frac{1}{L!}\sum_{\sigma\in\Sym(L)}\cS_{2k}^\sigma(z)
+  \label{eq:randomized-channel}
+\end{equation}
+であり、時間 $t$ を $r$ 分割したアルゴリズムは
+$\cR_{2k}(-it/r)^r$ である。実装時に $L!$ 個の回路をすべて走らせる必要はなく、
+各区間で一つの一様ランダム置換をサンプルすればよい。
+
+\subsection{スケーリング}
+
+$\Lambda:=\max_j\norm{H_j}$ とする。Childs--Ostrander--Su の定数付き評価は
+\begin{align}
+  &\chanerr\left(
+    \cU(t),\cR_{2k}(-it/r)^r
+  \right)
+  \nonumber\\
+  &\quad\leq
+  4\frac{(2\cdot5^{k-1}\Lambda|t|L)^{4k+2}}
+  {((2k+1)!)^2r^{4k+1}}
+  \exp\left(4\cdot5^{k-1}\frac{\Lambda|t|L}{r}\right)
+  \nonumber\\
+  &\qquad\quad+
+  2\frac{(2\cdot5^{k-1}\Lambda|t|)^{2k+1}L^{2k}}
+  {(2k-1)!r^{2k}}
+  \exp\left(2\cdot5^{k-1}\frac{\Lambda|t|L}{r}\right).
+  \label{eq:randomized-full-bound}
+\end{align}
+ここで $\cU(t)(\rho)=U(t)\rho U(t)^\dagger$ である。固定 $k$、
+$\Lambda=O(1)$、$r>tL$ として指数因子と $k$ 依存を定数に吸収すると
+\begin{equation}
+  \chanerr\left(\cU(t),\cR_{2k}(-it/r)^r\right)
+  =O\left(
+    \frac{(tL)^{4k+2}}{r^{4k+1}}
+    +\frac{t^{2k+1}L^{2k}}{r^{2k}}
+  \right).
+  \label{eq:randomized-asymptotic-error}
+\end{equation}
+一区間は $O(L)$ 個の指数関数を含むので、許容誤差を $\epsilon$ とした
+ゲート数は
+\begin{equation}
+  g_{2k}^{\mathrm{rand}}
+  =\max\left\{
+    O\left(tL^2\left(\frac{tL}{\epsilon}\right)^{1/(4k+1)}\right),
+    O\left(tL^2\left(\frac{t}{\epsilon}\right)^{1/(2k)}\right)
+  \right\}.
+  \label{eq:randomized-gate-count}
+\end{equation}
+一方、同じ粗い $L^1$ 型評価を使う決定論的公式では
+\begin{equation}
+  g_{2k}^{\mathrm{det}}
+  =O\left(tL^2\left(\frac{tL}{\epsilon}\right)^{1/(2k)}\right).
+\end{equation}
+したがって randomized formula は常に $L$ 依存を改善し、パラメータ領域に
+よっては $t$ と $\epsilon$ の依存も改善する。一次公式については、
+$\Lambda=O(1)$ のもとで
+\begin{equation}
+  g_1^{\mathrm{rand}}
+  =O\left(\frac{t^{3/2}L^{5/2}}{\epsilon^{1/2}}\right),
+  \qquad
+  g_1^{\mathrm{det}}
+  =O\left(\frac{t^2L^3}{\epsilon}\right)
+\end{equation}
+となる。
+
+\subsection{なぜ \texorpdfstring{$L$}{L} の次数が下がるのか}
+
+証明の組合せ論的な部分を追う。Suzuki 公式を含む一般の積を
+\begin{equation}
+  W^\sigma(z)
+  :=\prod_{\alpha=1}^{\kappa}
+    \prod_{\ell=1}^{L}
+    \exp\left(q_\alpha z
+      H_{\sigma(\pi_\alpha(\ell))}\right)
+  \label{eq:row-column-formula}
+\end{equation}
+と書く。$\alpha$ が行、$\ell$ が列を表し、$\pi_\alpha\in\Sym(L)$ は各行の
+内部順序である。$2k$ 次 Suzuki 公式では
+$\kappa=2\cdot5^{k-1}$ 個の forward または backward sweep に分解できる。
+
+Taylor 展開の $s$ 次項に現れる
+$H_{m_1}\cdots H_{m_s}$ のうち、$m_1,\ldots,m_s$ がすべて異なるものを
+\emph{nondegenerate}、少なくとも一つ重複するものを \emph{degenerate} と呼ぶ。
+
+\begin{lemma}[Randomization lemma]
+  $s\leq L$ とする。式~\eqref{eq:row-column-formula} を全置換で平均したとき、
+  $s$ 次の nondegenerate 項は
+  \begin{equation}
+    \frac{[(q_1+\cdots+q_\kappa)z]^s}{s!}
+    \sum_{\substack{m_1,\ldots,m_s\\
+      \text{pairwise distinct}}}
+    H_{m_1}\cdots H_{m_s}
+    \label{eq:randomization-lemma-term}
+  \end{equation}
+  である。
+\end{lemma}
+
+\begin{proof}[証明の概略]
+  展開項を取り出した行を
+  $\alpha_1\leq\cdots\leq\alpha_s$、列を
+  $\ell_1,\ldots,\ell_s$ とする。同じ行から取った項については積の順序を
+  保つ。行 $\alpha$ から $r_\alpha$ 個取ったとすると
+  $r_1+\cdots+r_\kappa=s$ であり、係数は
+  $(q_1z)^{r_1}\cdots(q_\kappa z)^{r_\kappa}$ となる。
+
+  相異なる $s$ 個の列ラベルを取る方法は
+  $L(L-1)\cdots(L-s+1)$ 通りである。同じ行から選んだ $r_\alpha$ 個の
+  並べ替えは同一の選択を表すので、過剰計数を
+  $r_1!\cdots r_\kappa!$ で割る。さらに $\sigma$ を一様平均すると、選ばれた
+  相異なるラベルは、任意の相異なる
+  $(m_1,\ldots,m_s)$ に一様に写る。したがって必要な係数は
+  \begin{align}
+    \sum_{\substack{r_1+\cdots+r_\kappa=s\\r_\alpha\geq0}}
+    \frac{(q_1z)^{r_1}\cdots(q_\kappa z)^{r_\kappa}}
+    {r_1!\cdots r_\kappa!}
+    =\frac{[(q_1+\cdots+q_\kappa)z]^s}{s!},
+  \end{align}
+  となる。最後の等号は多項定理である。
+\end{proof}
+
+積公式の一次の整合性条件は $\sum_\alpha q_\alpha=1$ である。よって
+式~\eqref{eq:randomization-lemma-term} は理想発展
+\begin{equation}
+  e^{z\sum_jH_j}
+  =\sum_{s=0}^{\infty}\frac{z^s}{s!}
+    \sum_{m_1,\ldots,m_s}H_{m_1}\cdots H_{m_s}
+\end{equation}
+の nondegenerate 項と完全に一致する。平均演算子の誤差に残るのは
+degenerate 項だけである。
+
+$s$ 次の全添字列は $L^s$ 個、すべて異なる列は
+$L(L-1)\cdots(L-s+1)$ 個である。重複する位置の対 $(a,b)$ を union bound
+で数えると
+\begin{align}
+  L^s-L(L-1)\cdots(L-s+1)
+  &\leq \binom{s}{2}L^{s-1}.
+  \label{eq:degenerate-count}
+\end{align}
+各 $\norm{H_j}$ を $\Lambda$ で上から押さえる粗い $L^1$ 型評価において、
+通常の $L^s$ が $L^{s-1}$ に置き換わるのはこのためである。ここでは
+どの $[H_i,H_j]$ が小さいか、あるいはゼロかという情報を一切使っていない。
+
+より具体的には、$s>2k$ の平均演算子誤差は
+\begin{equation}
+  \frac{(2\cdot5^{k-1}\Lambda|z|)^s}{(s-2)!}L^{s-1}
+  \label{eq:fixed-order-random-error}
+\end{equation}
+で押さえられる。一方、個々の積公式の演算子誤差は
+\begin{equation}
+  O\left(
+    \frac{(2\cdot5^{k-1}\Lambda|z|L)^{2k+1}}
+    {(2k+1)!}
+    e^{2\cdot5^{k-1}\Lambda|z|L}
+  \right)
+\end{equation}
+である。指数関数の tail bound
+\begin{equation}
+  \sum_{s=m}^{\infty}\frac{x^s}{s!}
+  \leq\frac{x^m}{m!}e^x
+  \qquad(x\geq0)
+  \label{eq:exponential-tail}
+\end{equation}
+を式~\eqref{eq:fixed-order-random-error} に適用して平均演算子誤差を評価し、
+mixing lemma で「個別誤差の二乗」と「平均誤差」に分ける。最後に
+$z=-it/r$ として式~\eqref{eq:composition-subadditivity} を $r$ 区間に使うと、
+式~\eqref{eq:randomized-full-bound} が得られる。
+
+\begin{notebox}[改善の意味]
+  「$L$ の次数が一つ下がる」とは、式~\eqref{eq:degenerate-count} により、
+  固定 Taylor 次数 $s$ の粗い項数が $L^s$ から $L^{s-1}$ へ下がることを
+  指す。二種類の誤差項から $r$ を解くため、最終ゲート数の $L$ 指数が常に
+  ちょうど一つ下がる、という主張ではない。
+\end{notebox}
+
+一様置換の生成には一区間あたり
+$\log_2(L!)=\Theta(L\log L)$ random bits が必要である。一方、選んだ置換を
+古典制御で逐次実行するだけなので、置換の重ね合わせを保持する量子 ancilla は
+不要である。
+
+\section{qDRIFT}
+
+\subsection{お気持ち：全項を毎回使わず生成子だけを合わせる}
+
+qDRIFT では Hamiltonian を
+\begin{equation}
+  H=\sum_{j=1}^{L}h_jH_j,
+  \qquad
+  h_j\geq0,
+  \quad \norm{H_j}=1,
+  \quad \lambda:=\sum_{j=1}^{L}h_j
+  \label{eq:qdrift-decomposition}
+\end{equation}
+と書く。係数が負なら、その符号を $H_j$ に吸収すればよい。また
+$\norm{H_j}<1$ なら係数側にノルムを吸収して正規化できる。
+
+積公式は一時間区間ごとに全 $L$ 項を一度ずつ使う。これに対し qDRIFT は、
+一回につき一項だけを
+\begin{equation}
+  p_j:=\frac{h_j}{\lambda}
+  \label{eq:qdrift-probability}
+\end{equation}
+で選ぶ。大きい項ほど頻繁に選ばれるため、平均として見た生成子は元の
+Hamiltonian と一致する。Hamiltonian の幾何学的 locality や交換関係を
+仮定せず、係数の $\ell_1$ ノルム $\lambda$ だけで解析できる点が特徴である。
+
+\subsection{アルゴリズム}
+
+時間 $t$、ステップ数 $N$ に対し
+\begin{equation}
+  \tau:=\frac{\lambda t}{N}
+\end{equation}
+と置き、次を行う。
+\begin{enumerate}
+  \item 各 $n=1,\ldots,N$ について、$j_n$ を分布
+    $p_j=h_j/\lambda$ から独立にサンプルする。
+  \item 順に $e^{-i\tau H_{j_n}}$ を適用する。
+  \item 乱数列 $(j_1,\ldots,j_N)$ を捨てる。
+\end{enumerate}
+一回の実行で得られるユニタリは
+\begin{equation}
+  V_{\bm j}=e^{-i\tau H_{j_N}}\cdots e^{-i\tau H_{j_1}}
+\end{equation}
+である。乱数を平均したチャネルは、一ステップのチャネル
+\begin{equation}
+  \cE(\rho)
+  :=\sum_{j=1}^{L}p_j
+    e^{-i\tau H_j}\rho e^{i\tau H_j}
+  \label{eq:qdrift-one-step-channel}
+\end{equation}
+の $N$ 回合成 $\cE^N$ に正確に等しい。
+
+\subsection{生成子の一致}
+
+Liouvillian を
+\begin{equation}
+  \cL_j(\rho):=-i[H_j,\rho],
+  \qquad
+  \cL:=\sum_jh_j\cL_j
+\end{equation}
+と定義する。このとき理想チャネルは
+$\cU(t)=e^{t\cL}$ である。式~\eqref{eq:qdrift-one-step-channel} は
+\begin{align}
+  \cE
+  &=\sum_j\frac{h_j}{\lambda}e^{\tau\cL_j}\\
+  &=\cI+\frac{\tau}{\lambda}\cL
+    +\sum_j\frac{h_j}{\lambda}
+      \sum_{n=2}^{\infty}\frac{\tau^n\cL_j^n}{n!}\\
+  &=\cI+\frac{t}{N}\cL
+    +\sum_j\frac{h_j}{\lambda}
+      \sum_{n=2}^{\infty}\frac{(\lambda t/N)^n\cL_j^n}{n!}.
+  \label{eq:qdrift-channel-expansion}
+\end{align}
+一方、一ステップ分の理想チャネルは
+\begin{equation}
+  \cU_N:=e^{(t/N)\cL}
+  =\cI+\frac{t}{N}\cL
+   +\sum_{n=2}^{\infty}\frac{(t/N)^n\cL^n}{n!}.
+  \label{eq:ideal-channel-expansion}
+\end{equation}
+したがって零次と一次の項が完全に一致する。qDRIFT は一次 Trotter 公式そのもの
+ではないが、「一ステップの生成子を一次まで合わせる」という意味で一次公式に
+近い構造を持つ。
+
+\subsection{スケーリングの証明}
+
+線形写像の誘導トレースノルムを
+$\norm{\mathcal{A}}_{1\to1}
+:=\sup_{\norm{X}_1=1}\norm{\mathcal{A}(X)}_1$ と書く。
+交換子写像について
+\begin{equation}
+  \norm{\cL_j}_{1\to1}\leq2\norm{H_j}=2,
+  \qquad
+  \norm{\cL}_{1\to1}
+  \leq\sum_jh_j\norm{\cL_j}_{1\to1}
+  \leq2\lambda
+  \label{eq:liouvillian-bounds}
+\end{equation}
+を満たす。式~\eqref{eq:qdrift-channel-expansion} と
+式~\eqref{eq:ideal-channel-expansion} では一次項までが消えるので、三角不等式と
+劣乗法性から
+\begin{align}
+  \norm{\cU_N-\cE}_{1\to1}
+  &\leq
+  \sum_{n=2}^{\infty}
+    \frac{|t|^n\norm{\cL}_{1\to1}^n}{n!N^n}
+  +\sum_j\frac{h_j}{\lambda}
+    \sum_{n=2}^{\infty}
+    \frac{(\lambda|t|)^n\norm{\cL_j}_{1\to1}^n}{n!N^n}\\
+  &\leq
+  2\sum_{n=2}^{\infty}
+    \frac{(2\lambda|t|/N)^n}{n!}.
+  \label{eq:qdrift-tail-before-distance}
+\end{align}
+式~\eqref{eq:exponential-tail} を使うと、一ステップのチャネル誤差は
+\begin{equation}
+  \chanerr(\cU_N,\cE)
+  \leq
+  2\sum_{n=2}^{\infty}\frac{(2\lambda|t|/N)^n}{n!}
+  \leq
+  \frac{4\lambda^2t^2}{N^2}
+  e^{2\lambda|t|/N}.
+  \label{eq:qdrift-one-step-error}
+\end{equation}
+さらに式~\eqref{eq:composition-subadditivity} より
+\begin{equation}
+  \chanerr(\cU(t),\cE^N)
+  \leq
+  \frac{4\lambda^2t^2}{N}
+  e^{2\lambda|t|/N}.
+  \label{eq:qdrift-total-error}
+\end{equation}
+$N\gg\lambda|t|$ なら指数因子はほぼ $1$ であり、誤差 $\epsilon$ を得るには
+\begin{equation}
+  N=O\left(\frac{\lambda^2t^2}{\epsilon}\right)
+  \label{eq:qdrift-complexity}
+\end{equation}
+回の一項時間発展で十分である。定数を含めて安全な最小整数を選ぶ場合には、
+式~\eqref{eq:qdrift-total-error} 自体を $N$ について解けばよい。
+
+\subsection{どのような Hamiltonian に向くか}
+
+$\Lambda:=\max_jh_j$ とすると $\lambda\leq L\Lambda$ なので、最悪の場合は
+\begin{equation}
+  N=O\left(\frac{L^2\Lambda^2t^2}{\epsilon}\right)
+\end{equation}
+となる。この領域でも一次 Trotter の粗い
+$O(L^3\Lambda^2t^2/\epsilon)$ より一段軽いが、高次積公式の $t$ と
+$\epsilon$ に対する依存には負けうる。
+
+一方、長距離相互作用を持つ問題では、多数の項が存在しても係数が小さく、
+$\lambda\ll L\Lambda$ となりうる。例えば
+$\lambda=O(\Lambda\sqrt{L})$ なら
+\begin{equation}
+  N=O\left(\frac{L\Lambda^2t^2}{\epsilon}\right)
+\end{equation}
+まで改善する。電子構造 Hamiltonian のように非局所項が多い場合、locality や
+可換性ではなく係数の総和だけを見る qDRIFT が有利になりうる。また全ゲートが
+同じ回転角 $\tau$ を持つことも、実装上の単純さにつながる。
+
+\section{比較と保証の範囲}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \renewcommand{\arraystretch}{1.35}
+  \begin{tabular}{|p{0.17\linewidth}|p{0.34\linewidth}|p{0.34\linewidth}|}
+    \hline
+    & Randomized product formula & qDRIFT \\
+    \hline
+    サンプリング対象
+      & 一時間区間内の $L$ 項の順序
+      & 一回に適用する Hamiltonian 項 $H_j$ \\
+    \hline
+    一ステップの量子操作
+      & $O(L)$ 個の項時間発展からなる $2k$ 次積公式
+      & 一つの $e^{-i\tau H_j}$ \\
+    \hline
+    主なパラメータ
+      & $L$ と $\Lambda=\max_j\norm{H_j}$
+      & $\lambda=\sum_jh_j$ \\
+    \hline
+    改善機構
+      & 置換平均で nondegenerate Taylor 項を相殺
+      & 係数比例サンプリングで一次生成子を一致 \\
+    \hline
+    構造の利用
+      & 交換子を使わない粗い項数評価
+      & locality・交換関係を使わない Liouvillian 評価 \\
+    \hline
+    得意な領域
+      & 積公式の高次精度を保ちつつ $L$ 依存を下げたい場合
+      & 多数の小さい非局所項があり $\lambda\ll L\Lambda$ の場合 \\
+    \hline
+  \end{tabular}
+  \caption{二つの古典確率混合アルゴリズムの比較。}
+  \label{tab:comparison}
+\end{table}
+
+\subsection{平均チャネルと単一のランダム回路}
+
+両手法の誤差保証は、乱数を忘れた後の平均チャネルに対する保証で
+ある。qDRIFT なら、各ステップを独立にサンプルした時点で平均チャネルは定義上
+ちょうど $\cE^N$ である。したがって「確率混合が $\cE^N$ に収束するまで追加で
+待つ」という過程はアルゴリズムの内部にはない。
+
+ただし、一度サンプルした特定の列 $\bm j$ に対応する $V_{\bm j}$ が
+$U(t)$ に各入力状態上で近い、とは主張していない。一つのランダム回路の
+典型誤差、有限本のランダム回路から作った経験平均の集中、複数回の測定から
+期待値を推定する統計誤差は、平均チャネルの simulation error とは別の問題で
+ある。実験では通常、各 shot で新しい乱数列を生成し、観測量の標本平均を取る。
+必要 shot 数は観測量の分散と要求する信頼度にも依存し、本稿の
+$r$ や $N$ の評価だけからは決まらない。
+
+\subsection{相関サンプリングへの展望}
+
+qDRIFT の証明では各ステップの選択が独立であるため、平均チャネルが単純な
+$\cE^N$ になる。Markov chain で項を選ぶ、直前の項に応じて遷移確率を変える、
+あるいは負の相関を導入するといった工夫は、同じ周辺分布
+$p_j=h_j/\lambda$ を保っても、一般には全体チャネルを $\cE^N$ と書けない。
+その場合には、定常分布だけでなく相関時間、初期分布、相関した誤差の蓄積を
+改めて評価する必要がある。構造をほとんど使わない qDRIFT の評価には改善の
+余地があるように見えるが、独立サンプリングの証明をそのまま流用することは
+できない。
+
+\section{まとめ}
+
+Randomized product formula は、Hamiltonian 項の順序が作る非対称性を一様置換
+平均で除き、Taylor 展開で $\Theta(L^s)$ 個ある nondegenerate 項を相殺する。
+残る重複添字は $O(L^{s-1})$ 個であり、この一段の差が mixing lemma を通じて
+ゲート数の改善になる。交換子構造を調べずに使える点が、この解析の簡潔さと
+強さである。
+
+qDRIFT はさらに積公式の「全項を一巡する」という発想を捨て、係数比例
+サンプリングにより平均 Liouvillian だけを一致させる。一回の操作は一項の時間
+発展だけで、コストは $L$ や最大係数を別々に見る代わりに
+$\lambda=\sum_jh_j$ で決まる。その代償として、時間と精度に対する依存は
+高次積公式ほど良くない。
+
+両者に共通する教訓は、coherent な近似誤差を各回路ごとに小さくする代わりに、
+古典乱数で誤差を平均化し、混合チャネルとして理想発展へ近づけられるという
+ことである。
+
+\bibliographystyle{junsrt}
+\bibliography{references}
+
+\end{document}

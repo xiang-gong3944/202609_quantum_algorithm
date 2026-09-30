@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.ipynb_checkpoints/
+.gitconfig-local
+
+# Generated LaTeX files
+note/out/
+
+# Locally stored source papers
+references/papers/
